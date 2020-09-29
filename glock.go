@@ -30,7 +30,7 @@ type glock struct {
 	timechan  chan bool
 }
 
-func New(client goku.Client, key string) (Glock, string) {
+func New(client goku.Client, key string) Glock {
 	client.Stream(key)
 	gl := &glock{
 		gok:       client,
@@ -42,7 +42,7 @@ func New(client goku.Client, key string) (Glock, string) {
 
 	go gl.streamer(context.Background())
 
-	return gl, gl.processID
+	return gl
 }
 
 func (g *glock) Lock(ctx context.Context) {

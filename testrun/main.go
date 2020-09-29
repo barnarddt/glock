@@ -30,15 +30,14 @@ func main() {
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
 		go func(num int) {
-			lock, pid := glock.New(lc, "test_key")
+			lock := glock.New(lc, "test_key")
 			for y := 0; y < 100; y++ {
 				lock.Lock(context.TODO())
 				ran := rand.Int()
 				mp[1] = ran
 				fmt.Println("lock for thread ", num)
 				if mp[1] != ran {
-					sm, _ := lc.Get(context.Background(), "test_key")
-					fmt.Println("Unexpected value in lock", ran, mp[1], string(sm.Value), pid)
+					fmt.Println("Unexpected value in lock", ran, mp[1])
 				}
 
 				lock.Unlock(context.TODO())
