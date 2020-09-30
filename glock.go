@@ -36,7 +36,7 @@ func New(client goku.Client, key string) Glock {
 		key:       key,
 		mt:        sync.Mutex{},
 		processID: uuid.New().String(),
-		timechan:  make(chan bool, 1),
+		timechan:  make(chan bool, 10),
 	}
 
 	go gl.streamer(context.Background())
@@ -141,7 +141,8 @@ func (g *glock) streamer(ctx context.Context) {
 				goku.EventTypeDelete,
 				goku.EventTypeExpire,
 				goku.EventTypeSet) &&
-				g.waiting {
+				g.waiting &&
+				len(g.timechan) == 0 {
 				g.timechan <- true
 			}
 			return nil
