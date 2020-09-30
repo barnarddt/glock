@@ -23,10 +23,10 @@ type Glock interface {
 type glock struct {
 	gok       goku.Client
 	key       string
-	kv        goku.KV
 	processID string
 	mt        sync.Mutex
 	waiting   bool
+	locked    bool
 	timechan  chan bool
 }
 
@@ -104,13 +104,18 @@ func (g *glock) Lock(ctx context.Context) {
 }
 
 func (g *glock) Unlock(ctx context.Context) {
+	if !g.locked {
+		// Called Unlock without actually having the lock,
+		// do nothing or risk overriding someone else's lock
+		return
+	}
 	defer g.mt.Unlock()
 	g.waiting = false
 
 	for {
 		err := g.gok.Set(ctx, g.key, []byte("unlocked"))
 		if err == nil {
-			g.kv = goku.KV{}
+			g.locked = false
 			return
 		}
 	}
