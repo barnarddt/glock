@@ -99,6 +99,7 @@ func (g *glock) Lock(ctx context.Context) {
 			continue
 		}
 
+		g.locked = true
 		return
 	}
 }
