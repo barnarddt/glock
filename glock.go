@@ -113,7 +113,18 @@ func (g *glock) Unlock(ctx context.Context) {
 	g.waiting = false
 
 	for {
-		err := g.gok.Set(ctx, g.key, []byte("unlocked"))
+		// ensure the lock is ours
+		kv, err := g.gok.Get(ctx, g.key)
+		if err != nil {
+			continue
+		}
+
+		// Sanity check, that the lock is ours
+		if string(kv.Value) != "locked_"+g.processID {
+			return
+		}
+
+		err = g.gok.Set(ctx, g.key, []byte("unlocked"))
 		if err == nil {
 			g.locked = false
 			return
