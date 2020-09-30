@@ -31,7 +31,6 @@ type glock struct {
 }
 
 func New(client goku.Client, key string) Glock {
-	client.Stream(key)
 	gl := &glock{
 		gok:       client,
 		key:       key,
