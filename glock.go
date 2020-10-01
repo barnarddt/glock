@@ -136,8 +136,10 @@ func (g *glock) Unlock() {
 		err = g.gok.Set(context.Background(), g.key, []byte("unlocked"))
 		if err == nil {
 			g.locked = false
-			g.cancel()
-			g.cancel = nil
+			if g.cancel != nil {
+				g.cancel()
+				g.cancel = nil
+			}
 			return
 		}
 	}
