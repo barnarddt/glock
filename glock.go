@@ -145,12 +145,22 @@ func (g *glock) Unlock() {
 
 func (g *glock) keepAlive(ctx context.Context) {
 	firstRun := true
+	explicitFail := time.Now().Add(time.Second*15)
 	for {
 		if firstRun {
 			firstRun = false
 			time.Sleep(time.Second * 5)
 		}
 		if !g.locked || errors.Is(ctx.Err(), context.Canceled) {
+			return
+		}
+
+		if time.Now().After(explicitFail) {
+			// We have tried and tried but cant update the lease for whatever reason,
+			// cancel the context
+			if g.cancel != nil {
+				g.cancel()
+			}
 			return
 		}
 
@@ -166,6 +176,7 @@ func (g *glock) keepAlive(ctx context.Context) {
 			return
 		}
 		if err != nil {
+			time.Sleep(time.Millisecond+50) //  don't spin
 			continue
 		}
 
@@ -185,10 +196,12 @@ func (g *glock) keepAlive(ctx context.Context) {
 			return
 		} else if err != nil {
 			// retry immediately to extend the lease
+			time.Sleep(time.Millisecond+50) //  don't spin
 			continue
 		}
 
 		// Extend the lease for another 20 seconds every 5 seconds.
+		explicitFail = time.Now().Add(time.Second*15)
 		time.Sleep(time.Second * 5)
 	}
 }
