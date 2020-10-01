@@ -1,15 +1,16 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
+	"math/rand"
+	"sync"
+	"time"
+
 	"github.com/barnarddt/glock"
 	"github.com/corverroos/goku/client/logical"
 	"github.com/corverroos/goku/db"
 	_ "github.com/go-sql-driver/mysql"
-	"math/rand"
-	"sync"
 )
 
 func main() {
@@ -31,8 +32,8 @@ func main() {
 		wg.Add(1)
 		go func(num int) {
 			lock := glock.New(lc, "test_key")
-			for y := 0; y < 100; y++ {
-				lock.Lock(context.TODO())
+			for y := 0; y < 10; y++ {
+				lock.Lock()
 				ran := rand.Int()
 				mp[1] = ran
 				fmt.Println("lock for thread ", num)
@@ -40,11 +41,20 @@ func main() {
 					fmt.Println("Unexpected value in lock", ran, mp[1])
 				}
 
-				lock.Unlock(context.TODO())
+				lock.Unlock()
 			}
 			defer wg.Done()
 		}(i)
 	}
 
 	wg.Wait()
+
+	lock := glock.New(lc, "long_key")
+	ctx := lock.Lock()
+	for i := 0; i < 10; i++ {
+		time.Sleep(time.Second * 10)
+		fmt.Println("ctx err", ctx.Err())
+	}
+	lock.Unlock()
+	fmt.Println("ctx err", ctx.Err())
 }

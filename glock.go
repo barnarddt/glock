@@ -16,8 +16,8 @@ import (
 )
 
 type Glock interface {
-	Lock(ctx context.Context)
-	Unlock(ctx context.Context)
+	Lock() context.Context
+	Unlock()
 }
 
 type glock struct {
@@ -27,6 +27,7 @@ type glock struct {
 	mt        sync.Mutex
 	waiting   bool
 	locked    bool
+	cancel    context.CancelFunc
 	timechan  chan bool
 }
 
@@ -44,7 +45,10 @@ func New(client goku.Client, key string) Glock {
 	return gl
 }
 
-func (g *glock) Lock(ctx context.Context) {
+// Lock returns a context, the context will be cancelled if keep alive fails for the lock
+// that you have acquired. If the the context gets cancelled and the lock is no longer guarenteed.
+// Calling Unlock once the context is cancelled is harmless and will result in a no-op.
+func (g *glock) Lock() context.Context {
 	var (
 		kv  goku.KV
 		err error
@@ -52,6 +56,9 @@ func (g *glock) Lock(ctx context.Context) {
 
 	g.mt.Lock()
 	g.waiting = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.cancel = cancel
 
 	for {
 		for {
@@ -75,11 +82,11 @@ func (g *glock) Lock(ctx context.Context) {
 		if err != nil {
 			err = g.gok.Set(ctx, g.key, []byte("locked_"+g.processID),
 				goku.WithCreateOnly(),
-				goku.WithExpiresAt(time.Now().Add(time.Second*10)))
+				goku.WithExpiresAt(time.Now().Add(time.Second*20)))
 		} else {
 			err = g.gok.Set(ctx, g.key, []byte("locked_"+g.processID),
 				goku.WithPrevVersion(kv.Version),
-				goku.WithExpiresAt(time.Now().Add(time.Second*10)))
+				goku.WithExpiresAt(time.Now().Add(time.Second*20)))
 		}
 
 		if err != nil {
@@ -99,11 +106,13 @@ func (g *glock) Lock(ctx context.Context) {
 		}
 
 		g.locked = true
-		return
+		go g.keepAlive(ctx)
+		return ctx
 	}
 }
 
-func (g *glock) Unlock(ctx context.Context) {
+// Unlock once called the context received from Lock will be cancelled
+func (g *glock) Unlock() {
 	if !g.locked {
 		// Called Unlock without actually having the lock,
 		// do nothing or risk overriding someone else's lock
@@ -114,7 +123,7 @@ func (g *glock) Unlock(ctx context.Context) {
 
 	for {
 		// ensure the lock is ours
-		kv, err := g.gok.Get(ctx, g.key)
+		kv, err := g.gok.Get(context.Background(), g.key)
 		if err != nil {
 			continue
 		}
@@ -124,11 +133,63 @@ func (g *glock) Unlock(ctx context.Context) {
 			return
 		}
 
-		err = g.gok.Set(ctx, g.key, []byte("unlocked"))
+		err = g.gok.Set(context.Background(), g.key, []byte("unlocked"))
 		if err == nil {
 			g.locked = false
+			g.cancel()
+			g.cancel = nil
 			return
 		}
+	}
+}
+
+func (g *glock) keepAlive(ctx context.Context) {
+	firstRun := true
+	for {
+		if firstRun {
+			firstRun = false
+			time.Sleep(time.Second * 5)
+		}
+		if !g.locked || errors.Is(ctx.Err(), context.Canceled) {
+			return
+		}
+
+		// ensure the lock is ours
+		kv, err := g.gok.Get(ctx, g.key)
+		if errors.Is(err, context.Canceled) {
+			// Unlock must have cancelled the context, do nothing
+			return
+		} else if errors.Is(err, goku.ErrNotFound) {
+			if g.cancel != nil {
+				g.cancel()
+			}
+			return
+		}
+		if err != nil {
+			continue
+		}
+
+		// If we don't have the lock anymore cancel the context so whoever
+		// thinks they have it can get notified.
+		if string(kv.Value) != "locked_"+g.processID {
+			if g.cancel != nil {
+				g.cancel()
+			}
+			return
+		}
+
+		// Extend the lease on the lock by 20 seconds
+		err = g.gok.UpdateLease(ctx, kv.LeaseID, time.Now().Add(time.Second*20))
+		if errors.Is(err, context.Canceled) {
+			// Unlock must have cancelled the context, do nothing
+			return
+		} else if err != nil {
+			// retry immediately to extend the lease
+			continue
+		}
+
+		// Extend the lease for another 20 seconds every 5 seconds.
+		time.Sleep(time.Second * 5)
 	}
 }
 
