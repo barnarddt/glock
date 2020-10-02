@@ -113,6 +113,13 @@ func (g *glock) Lock() context.Context {
 
 // Unlock once called the context received from Lock will be cancelled
 func (g *glock) Unlock() {
+	defer func() {
+		// Cancel the context when this returns
+		if g.cancel != nil {
+			g.cancel()
+			g.cancel = nil
+		}
+	}()
 	if !g.locked {
 		// Called Unlock without actually having the lock,
 		// do nothing or risk overriding someone else's lock
@@ -136,10 +143,6 @@ func (g *glock) Unlock() {
 		err = g.gok.Set(context.Background(), g.key, []byte("unlocked"))
 		if err == nil {
 			g.locked = false
-			if g.cancel != nil {
-				g.cancel()
-				g.cancel = nil
-			}
 			return
 		}
 	}
